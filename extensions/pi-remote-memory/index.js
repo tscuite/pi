@@ -34,7 +34,6 @@ import { pathToFileURL } from 'node:url';
 const SOURCE_TAG = 'pi-remote-memory';
 const DEFAULT_SCOPE = 'assistant';
 const DEFAULT_SUBJECT = 'pi-agent';
-const REMOTE_LIST_CAP = 100; // worker GET /api/memories 单页上限
 const FETCH_TIMEOUT_MS = 20_000;
 const SHUTDOWN_SYNC_BUDGET_MS = 8_000; // session_shutdown 同步总预算：pi 对该 handler 是无超时 await 的
 
@@ -145,16 +144,28 @@ function readLocalMemories(dbPath) {
   }
 }
 
-async function fetchRemoteRows(config) {
+const PAGE_SIZE_DEFAULT = 100; // 与 worker GET /api/memories 的 MAX_LIST_LIMIT 一致
+const MAX_PAGES = 10; // 安全上限：10 页 × 100 = 1000 行，防止死循环
+
+function resolvePageSize() {
+  // 仅供测试分页逻辑（如 PI_REMOTE_MEMORY_PAGE_SIZE=5），正常使用勿设
+  const raw = Number.parseInt(process.env.PI_REMOTE_MEMORY_PAGE_SIZE ?? '', 10);
+  return Number.isInteger(raw) && raw >= 1 && raw <= 100 ? raw : PAGE_SIZE_DEFAULT;
+}
+
+async function fetchRemotePage(config, pageSize, afterId) {
   const url = new URL('/api/memories', config.endpoint);
   for (const [key, value] of [
     ['namespace', config.namespace],
     ['scope', config.scope],
     ['subject', config.subject],
     ['include_compacted', '1'],
-    ['limit', String(REMOTE_LIST_CAP)],
+    ['limit', String(pageSize)],
   ]) {
     url.searchParams.set(key, value);
+  }
+  if (afterId != null) {
+    url.searchParams.set('after_id', String(afterId));
   }
 
   const response = await fetch(url, {
@@ -164,13 +175,34 @@ async function fetchRemoteRows(config) {
   if (!response.ok) {
     throw new Error(`remote list failed: HTTP ${response.status} ${await response.text()}`);
   }
+  return response.json();
+}
 
-  const body = await response.json();
-  const items = Array.isArray(body.items) ? body.items : [];
-  if (items.length >= REMOTE_LIST_CAP) {
-    log(`warning: remote rows reached the ${REMOTE_LIST_CAP} list cap; older rows are invisible to this sync`);
+async function fetchRemoteRows(config) {
+  const pageSize = resolvePageSize();
+  const rows = [];
+  let afterId = null;
+
+  // keyset 分页：满页时 next_after_id 为下一页游标；短页/旧版 worker
+  // （无 next_after_id 字段）时自然终止，行为与单页拉取兼容。
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const body = await fetchRemotePage(config, pageSize, afterId);
+    const items = Array.isArray(body.items) ? body.items : [];
+    rows.push(...items);
+
+    const next = body.next_after_id;
+    if (next == null) {
+      if (page > 1) log(`fetched ${rows.length} remote rows in ${page} pages`);
+      return rows.map((row) => ({
+        ...row,
+        hash: createHash('sha1').update(String(row.content)).digest('hex'),
+      }));
+    }
+    afterId = next;
   }
-  return items.map((row) => ({
+
+  log(`warning: remote rows exceeded ${MAX_PAGES} pages of ${pageSize}; older rows are invisible to this sync`);
+  return rows.map((row) => ({
     ...row,
     hash: createHash('sha1').update(String(row.content)).digest('hex'),
   }));

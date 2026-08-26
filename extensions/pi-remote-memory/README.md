@@ -62,6 +62,6 @@ pi 编码代理扩展：把本地 [pi-hermes-memory](https://www.npmjs.com/packa
 ## 设计边界
 
 - 只同步**全局记忆**（`project IS NULL`）；项目级记忆（`~/.config/pi/projects-memory/`）不同步
-- 远端列表单页上限 100 条，超过时日志告警（hermes 自动整理保证全局记忆规模通常远小于此）
+- 远端拉取采用 keyset 分页（`after_id` 游标，页大小 100，安全上限 10 页 = 1000 行），行数增长不再丢失可见性；超过 10 页时日志告警。多页拉取详情可用 `PI_REMOTE_MEMORY_PAGE_SIZE=5 node index.js --dry-run` 观察分页路径
 - 快照撞上正在写入的 WAL 时本轮放弃，下个触发点自动重试
 - Node ≥ 22.5（`node:sqlite`）
