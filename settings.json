@@ -8,5 +8,8 @@
     "npm:@juicesharp/rpiv-todo",
     "npm:pi-hermes-memory",
     "npm:pi-lens"
+  ],
+  "extensions": [
+    "/Users/tscuite/Documents/public/pi-remote-memory/index.js"
   ]
 }
