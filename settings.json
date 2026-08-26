@@ -1,6 +1,6 @@
 {
   "lastChangelogVersion": "0.84.3",
-  "theme": "tokyonight-moon",
+  "theme": "claude",
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:pi-web-access",
