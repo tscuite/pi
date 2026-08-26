@@ -26,7 +26,11 @@ pi 编码代理扩展：把本地 [pi-hermes-memory](https://www.npmjs.com/packa
 
 ## 日志与通知
 
-扩展在 pi 内**不打印任何裸 console 日志**：pi TUI 接管终端后，裸输出会原样落在光标当前位置（如输入框）破坏画面。用户可见信息只走 `ctx.ui.notify`：后台同步**真实失败**（网络/服务端错误）才报 error，成功与 dormant（无配置/无库/快照竞态）均静默。排查时设 `PI_REMOTE_MEMORY_VERBOSE=1` 可恢复控制台日志。CLI 模式始终打印。
+扩展在 pi 内**不打印任何裸 console 日志**：pi TUI 接管终端后，裸输出会原样落在光标当前位置（如输入框）破坏画面。可观测性这样保证：
+
+- **同步日志文件**：每轮同步（含 dormant、失败）追加一行到 `<agent-root>/pi-remote-memory.log`（本机即 `~/.config/pi/pi-remote-memory.log`，可用 `PI_REMOTE_MEMORY_LOGFILE` 覆盖路径；超 512KB 轮转保留一代 `.old`）。看同步是否发生/结果：`tail ~/.config/pi/pi-remote-memory.log`
+- **TUI 通知**：后台同步有实际变更（created/deleted > 0）时 `ui.notify(info)`；真实失败 `ui.notify(error)`；无变更与 dormant 静默
+- `PI_REMOTE_MEMORY_VERBOSE=1` 恢复 console 打印，仅供非 TUI 场景排查，勿在正常 pi 会话中使用。CLI 模式始终打印
 
 ## 配置
 

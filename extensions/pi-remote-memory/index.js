@@ -10,10 +10,13 @@
  *   - 本地记忆被改写/合并   → 表现为旧行删除 + 新行创建
  *
  * 触发方式：
- *   - pi 会话启动 5 秒后自动同步一次（后台，不阻塞；失败才 ui.notify，成功静默）
+ *   - pi 会话启动 5 秒后自动同步一次（后台，不阻塞）
  *   - pi 会话结束时自动同步一次（总预算 8s，不阻塞退出）
  *   - 手动：/sync 命令，或 `node index.js [--dry-run]`
- *   - pi 内部不打印任何裸日志（会破坏 TUI 画面）；排查用 PI_REMOTE_MEMORY_VERBOSE=1
+ *   - pi 内部不打印任何裸 console（会破坏 TUI 画面）：
+ *       · 每次同步（含 dormant/失败）追加一行到 <agent-root>/pi-remote-memory.log
+ *       · 有实际变更（created/deleted>0）才 ui.notify(info)；失败 ui.notify(error)
+ *       · 排查非 TUI 场景可用 PI_REMOTE_MEMORY_VERBOSE=1（会打印 console，勿在 TUI 用）
  *
  * 配置：默认 <agent-root>/pi-remote-memory.json（跟随 PI_CODING_AGENT_DIR，
  * 本机即 ~/.config/pi/pi-remote-memory.json；建议 chmod 600）
@@ -23,7 +26,7 @@
 
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -43,6 +46,27 @@ let cliMode = false; // node index.js 直接运行时置 true
 function log(message) {
   if (cliMode || VERBOSE) {
     console.log(`[${SOURCE_TAG}] ${message}`);
+  }
+}
+
+// 持久化同步日志：每轮同步追加一行，观察同步是否发生/结果如何都看这里
+//（pi 内不能靠 console：裸输出会破坏 TUI 画面）。超过 512KB 轮转保留一代 .old。
+const LOG_ROTATE_BYTES = 512 * 1024;
+
+function logFilePath() {
+  return process.env.PI_REMOTE_MEMORY_LOGFILE
+    ?? path.join(resolveAgentRoot(), 'pi-remote-memory.log');
+}
+
+function appendLog(message) {
+  try {
+    const file = logFilePath();
+    if (existsSync(file) && statSync(file).size > LOG_ROTATE_BYTES) {
+      renameSync(file, `${file}.old`);
+    }
+    appendFileSync(file, `${new Date().toISOString()} ${message}\n`);
+  } catch {
+    // 日志写入失败不影响同步本身
   }
 }
 
@@ -203,6 +227,7 @@ async function runSync({ dryRun = false } = {}) {
     const configResult = loadConfig();
     if (configResult.error) {
       log(`dormant: ${configResult.error}`);
+      appendLog(`dormant: ${configResult.error}`);
       return { dormant: configResult.error };
     }
     const config = configResult.value;
@@ -210,6 +235,7 @@ async function runSync({ dryRun = false } = {}) {
     const dbPath = resolveLocalDbPath();
     if (!existsSync(dbPath)) {
       log(`dormant: local memory db not found: ${dbPath}`);
+      appendLog(`dormant: local memory db not found: ${dbPath}`);
       return { dormant: `local memory db not found: ${dbPath}` };
     }
 
@@ -219,6 +245,7 @@ async function runSync({ dryRun = false } = {}) {
     } catch (error) {
       // 快照撞上正在写入的 WAL 属正常竞态，本轮放弃，下个触发点重试
       log(`snapshot failed (will retry on next trigger): ${error.message}`);
+      appendLog(`snapshot failed (will retry on next trigger): ${error.message}`);
       return { dormant: `snapshot failed (will retry): ${error.message}` };
     }
 
@@ -236,6 +263,9 @@ async function runSync({ dryRun = false } = {}) {
     });
 
     log(
+      `local=${localRows.length} remote=${remoteRows.length} create=${toCreate.length} delete=${toDelete.length}${dryRun ? ' (dry-run)' : ''}`,
+    );
+    appendLog(
       `local=${localRows.length} remote=${remoteRows.length} create=${toCreate.length} delete=${toDelete.length}${dryRun ? ' (dry-run)' : ''}`,
     );
 
@@ -263,6 +293,7 @@ async function runSync({ dryRun = false } = {}) {
 
     if (errors.length > 0) {
       log(`${errors.length} errors:\n  ${errors.join('\n  ')}`);
+      appendLog(`${errors.length} errors: ${errors.join(' | ')}`);
       return { error: `${errors.length} sync errors` };
     }
 
@@ -273,6 +304,7 @@ async function runSync({ dryRun = false } = {}) {
     return { created, deleted };
   } catch (error) {
     log(`sync failed: ${error.message}`);
+    appendLog(`sync failed: ${error.message}`);
     return { error: error.message };
   } finally {
     running = false;
@@ -290,9 +322,15 @@ export default function register(pi) {
       pendingTimer = null;
       runSync()
         .then((result) => {
-          // 只把真实失败（网络/服务端错误）通知用户；dormant 属预期，保持静默
-          if (result?.error && ctx?.hasUI) {
+          // 有实际变更才提示（info）；真实失败报 error；dormant 属预期，静默
+          if (!ctx?.hasUI) return;
+          if (result?.error) {
             ctx.ui.notify(`pi-remote-memory sync failed: ${result.error}`, 'error');
+          } else if ((result?.created ?? 0) + (result?.deleted ?? 0) > 0) {
+            ctx.ui.notify(
+              `pi-remote-memory: created=${result.created} deleted=${result.deleted}`,
+              'info',
+            );
           }
         })
         .catch(() => {});
