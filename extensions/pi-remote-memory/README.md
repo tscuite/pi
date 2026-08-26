@@ -13,7 +13,7 @@ pi 编码代理扩展：把本地 [pi-hermes-memory](https://www.npmjs.com/packa
 - 远端 cron 压缩产物（已压缩源行、`kind=compaction` 摘要）永不删除
 - 本地记忆被改写/合并 → 旧行删除 + 新行创建，自动收敛
 
-字段一一映射，无转换：`target / category / failure_reason / content` → 远端同名字段。
+字段一一映射，无转换：`target / category / failure_reason / content` → 远端同名字段；另固定写入 `horizon="permanent"`，使镜像不参与远端 cron 的 daily→weekly→monthly 分层压缩（镜像语义 = 与本地一致，原文永不摘要）。
 
 ## 触发方式
 

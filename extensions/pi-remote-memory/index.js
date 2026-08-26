@@ -190,6 +190,9 @@ async function createRemoteRow(config, row) {
       namespace: config.namespace,
       scope: config.scope,
       subject: config.subject,
+      // permanent：镜像语义 = 与本地一致（只增、按需检索）；不参与远端 cron 的
+      // daily→weekly→monthly→permanent 分层压缩，避免原文被机械摘要替换。
+      horizon: 'permanent',
       target: row.target || 'memory',
       category: row.category || null,
       failure_reason: row.failure_reason || null,
