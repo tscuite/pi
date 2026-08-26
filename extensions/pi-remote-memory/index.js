@@ -10,12 +10,12 @@
  *   - 本地记忆被改写/合并   → 表现为旧行删除 + 新行创建
  *
  * 触发方式：
- *   - pi 会话启动 5 秒后自动同步一次（后台，不阻塞）
+ *   - pi 会话启动 5 秒后自动同步一次（后台，不阻塞；完成后 ui.notify 一条 info 统计）
  *   - pi 会话结束时自动同步一次（总预算 8s，不阻塞退出）
  *   - 手动：/sync 命令，或 `node index.js [--dry-run]`
  *   - pi 内部不打印任何裸 console（会破坏 TUI 画面）：
  *       · 每次同步（含 dormant/失败）追加一行到 <agent-root>/pi-remote-memory.log
- *       · 有实际变更（created/deleted>0）才 ui.notify(info)；失败 ui.notify(error)
+ *       · 启动同步完成后 ui.notify(info) 带统计数字；失败 ui.notify(error)
  *       · 排查非 TUI 场景可用 PI_REMOTE_MEMORY_VERBOSE=1（会打印 console，勿在 TUI 用）
  *
  * 配置：默认 <agent-root>/pi-remote-memory.json（跟随 PI_CODING_AGENT_DIR，
@@ -301,7 +301,7 @@ async function runSync({ dryRun = false } = {}) {
       log(`done: created=${created} deleted=${deleted}`);
     }
 
-    return { created, deleted };
+    return { created, deleted, local: localRows.length, remote: remoteRows.length };
   } catch (error) {
     log(`sync failed: ${error.message}`);
     appendLog(`sync failed: ${error.message}`);
@@ -322,13 +322,17 @@ export default function register(pi) {
       pendingTimer = null;
       runSync()
         .then((result) => {
-          // 有实际变更才提示（info）；真实失败报 error；dormant 属预期，静默
+          // 启动同步总是给一条 info 确认（含统计数字）；失败报 error；dormant 静默
           if (!ctx?.hasUI) return;
           if (result?.error) {
             ctx.ui.notify(`pi-remote-memory sync failed: ${result.error}`, 'error');
-          } else if ((result?.created ?? 0) + (result?.deleted ?? 0) > 0) {
+          } else if (result?.skipped) {
+            ctx.ui.notify('pi-remote-memory: sync already running', 'warning');
+          } else if (result?.dormant) {
+            // 无配置/无库：预期内，静默（日志里有）
+          } else {
             ctx.ui.notify(
-              `pi-remote-memory: created=${result.created} deleted=${result.deleted}`,
+              `pi-remote-memory synced: local=${result.local} remote=${result.remote} created=${result.created} deleted=${result.deleted}`,
               'info',
             );
           }
