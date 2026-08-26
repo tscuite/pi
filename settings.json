@@ -1,4 +1,7 @@
 {
+  "defaultProvider": "zai-coding-cn",
+  "defaultModel": "glm-5.3",
+  "defaultThinkingLevel": "max",
   "lastChangelogVersion": "0.84.3",
   "theme": "claude",
   "packages": [
@@ -8,5 +11,9 @@
     "npm:@juicesharp/rpiv-todo",
     "npm:pi-hermes-memory",
     "npm:pi-lens"
+  ],
+  "enabledModels": [
+    "zai-coding-cn/glm-5.3",
+    "kimi-coding/k3"
   ]
 }
