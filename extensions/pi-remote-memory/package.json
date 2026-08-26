@@ -1,0 +1,12 @@
+{
+  "name": "pi-remote-memory",
+  "version": "0.2.0",
+  "description": "pi extension: mirror local pi-hermes-memory (global scope) to a remote memory-worker (Cloudflare D1) on session start/shutdown. Zero dependencies.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "sync": "node index.js",
+    "sync:dry": "node index.js --dry-run"
+  },
+  "license": "Apache-2.0"
+}
