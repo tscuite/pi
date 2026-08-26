@@ -1,0 +1,14 @@
+# 白名单模式：默认全部忽略，只同步下方列出的配置；凭证/会话/缓存永不入库
+*
+!.gitignore
+!README.md
+!AGENTS.md
+!settings.json
+!extensions/
+!extensions/**
+!prompts/
+!prompts/**
+!themes/
+!themes/**
+**/node_modules/
+# 注意：models.json 含 apiKey、auth.json 含登录凭证，仅保留在本机
