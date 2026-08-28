@@ -38,7 +38,7 @@ pi 编码代理扩展：把本地 [pi-hermes-memory](https://www.npmjs.com/packa
 
 ```json
 {
-  "endpoint": "https://memory.tscuite.workers.dev",
+  "endpoint": "https://<your-worker-name>.workers.dev",
   "username": "admin",
   "password": "<basic-auth-password>",
   "namespace": "default",
