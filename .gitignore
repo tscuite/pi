@@ -12,3 +12,4 @@
 !themes/**
 **/node_modules/
 # 注意：models.json 含 apiKey、auth.json 含登录凭证，仅保留在本机
+!lens-config.json

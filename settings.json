@@ -10,10 +10,12 @@
     "npm:pi-subagents",
     "npm:@juicesharp/rpiv-todo",
     "npm:pi-hermes-memory",
-    "npm:pi-lens"
+    "npm:pi-lens",
+    "git:github.com/DietrichGebert/ponytail"
   ],
   "enabledModels": [
     "zai-coding-cn/glm-5.3",
     "kimi-coding/k3"
-  ]
+  ],
+  "hideThinkingBlock": true
 }
