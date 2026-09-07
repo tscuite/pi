@@ -4,6 +4,8 @@
 !README.md
 !AGENTS.md
 !settings.json
+!agents/
+!agents/**
 !extensions/
 !extensions/**
 !prompts/
