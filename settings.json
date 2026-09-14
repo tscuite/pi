@@ -4,6 +4,9 @@
   "defaultThinkingLevel": "max",
   "lastChangelogVersion": "0.85.1",
   "theme": "claude",
+  "skills": [
+    "/Users/tscuite/.agents/skills/work"
+  ],
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:pi-web-access",
