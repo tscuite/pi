@@ -202,6 +202,30 @@
             "supportsStore": false,
             "supportsReasoningEffort": true
           }
+        },
+        {
+          "id": "custom-aliyun/qwen3.8-27b",
+          "name": "Qwen3.8 27B (Aliyun via CF)",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 1000000,
+          "maxTokens": 131072,
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsStore": false,
+            "supportsReasoningEffort": true,
+            "thinkingFormat": "qwen"
+          },
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": null,
+            "low": "low",
+            "medium": "medium",
+            "high": null,
+            "xhigh": "xhigh",
+            "max": null
+          }
         }
       ]
     }

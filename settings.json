@@ -32,7 +32,8 @@
     "cloudflare-ai-gateway/custom-tencent/deepseek-v4-pro",
     "cloudflare-ai-gateway/workers-ai/@cf/meta/llama-4-scout-17b-16e-instruct",
     "cloudflare-ai-gateway/workers-ai/@cf/google/gemma-4-26b-a4b-it",
-    "cloudflare-ai-gateway/custom-ollama/gemma4:31b-cloud"
+    "cloudflare-ai-gateway/custom-ollama/gemma4:31b-cloud",
+    "cloudflare-ai-gateway/custom-aliyun/qwen3.8-27b"
   ],
   "hideThinkingBlock": true,
   "subagents": {
