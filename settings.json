@@ -14,12 +14,27 @@
     "npm:@juicesharp/rpiv-todo",
     "npm:pi-hermes-memory",
     "npm:pi-lens",
-    "git:github.com/DietrichGebert/ponytail"
+    "git:github.com/DietrichGebert/ponytail",
+    "git:github.com/tscuite/pi-copilot-auto"
   ],
   "enabledModels": [
-    "openai-codex/gpt-5.6-luna"
+    "openai-codex/gpt-5.6-luna",
+    "github-copilot/auto",
+    "deepseek/deepseek-v4-flash",
+    "cloudflare-ai-gateway/custom-aliyun/deepseek-v4-flash-0731",
+    "cloudflare-ai-gateway/custom-aliyun/deepseek-v4.1-flash",
+    "cloudflare-ai-gateway/custom-aliyun/qwen3.8-flash",
+    "cloudflare-ai-gateway/custom-aliyun/kimi-k3",
+    "cloudflare-ai-gateway/custom-aliyun/glm-5.3",
+    "cloudflare-ai-gateway/custom-modelscope/deepseek-ai/DeepSeek-V4.1-Flash",
+    "cloudflare-ai-gateway/custom-modelscope/ZhipuAI/GLM-5.3-Flash",
+    "cloudflare-ai-gateway/custom-tencent/deepseek-v4-flash",
+    "cloudflare-ai-gateway/custom-tencent/deepseek-v4-pro",
+    "cloudflare-ai-gateway/workers-ai/@cf/meta/llama-4-scout-17b-16e-instruct",
+    "cloudflare-ai-gateway/workers-ai/@cf/google/gemma-4-26b-a4b-it",
+    "cloudflare-ai-gateway/custom-ollama/gemma4:31b-cloud"
   ],
-  "hideThinkingBlock": false,
+  "hideThinkingBlock": true,
   "subagents": {
     "agentOverrides": {
       "cursor-agent": {
