@@ -226,6 +226,30 @@
             "xhigh": "xhigh",
             "max": null
           }
+        },
+        {
+          "id": "custom-nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+          "name": "Nemotron 3.5 Lightning 30B A3B (NVIDIA via CF)",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 262144,
+          "maxTokens": 262144,
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsStore": false,
+            "supportsReasoningEffort": false,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": { "$var": "thinking.enabled" }
+            }
+          },
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": null,
+            "medium": null
+          }
         }
       ]
     }

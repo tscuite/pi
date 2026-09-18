@@ -33,7 +33,8 @@
     "cloudflare-ai-gateway/workers-ai/@cf/meta/llama-4-scout-17b-16e-instruct",
     "cloudflare-ai-gateway/workers-ai/@cf/google/gemma-4-26b-a4b-it",
     "cloudflare-ai-gateway/custom-ollama/gemma4:31b-cloud",
-    "cloudflare-ai-gateway/custom-aliyun/qwen3.8-27b"
+    "cloudflare-ai-gateway/custom-aliyun/qwen3.8-27b",
+    "cloudflare-ai-gateway/custom-nvidia/nvidia/nemotron-3.5-lightning-30b-a3b"
   ],
   "hideThinkingBlock": true,
   "subagents": {
