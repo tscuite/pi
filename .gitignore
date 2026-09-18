@@ -4,6 +4,7 @@
 !README.md
 !AGENTS.md
 !settings.json
+!models.json
 !agents/
 !agents/**
 !extensions/
@@ -13,5 +14,5 @@
 !themes/
 !themes/**
 **/node_modules/
-# 注意：models.json 含 apiKey、auth.json 含登录凭证，仅保留在本机
+# 注意：auth.json 含登录凭证，仅保留在本机；models.json 已脱敏（无 apiKey，账号为占位符）
 !lens-config.json
