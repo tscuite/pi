@@ -13,7 +13,11 @@
     "npm:pi-subagents",
     "npm:@juicesharp/rpiv-todo",
     "npm:pi-hermes-memory",
-    "npm:pi-lens",
+    {
+      "source": "npm:pi-lens",
+      "extensions": [],
+      "skills": []
+    },
     "git:github.com/DietrichGebert/ponytail",
     "git:github.com/tscuite/pi-copilot-auto"
   ],
