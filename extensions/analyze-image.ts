@@ -23,6 +23,8 @@ const BASE_URL = (
   process.env.ANALYZE_IMAGE_BASE_URL ?? "https://open.bigmodel.cn/api/coding/paas/v4"
 ).replace(/\/$/, "");
 const VISION_MODEL = process.env.ANALYZE_IMAGE_MODEL ?? "glm-4.6v";
+const VISION_SERVICE = PROVIDER === "zai-coding-cn" ? "Z.ai" : PROVIDER;
+const VISION_LABEL = `${VISION_SERVICE} ${VISION_MODEL}`;
 
 const DEFAULT_PROMPT =
   "请详细描述这张图片：界面布局、所有可见文字（逐字转录、保留原文语言）、颜色风格、主要组件和交互元素。";
@@ -103,9 +105,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: TOOL_NAME,
-    label: "Analyze Image",
+    label: `Analyze Image (${VISION_LABEL})`,
     description:
-      "Analyze an image with a vision model. Input is a local file path or https URL. " +
+      `Analyze an image with ${VISION_LABEL} vision model. Input is a local file path or https URL. ` +
       "Returns detailed text: layout, verbatim transcription of all visible text (original language), " +
       "colors, components, interactive elements. Use whenever the conversation contains an image " +
       "placeholder you cannot see, or when the user asks about an image file.",

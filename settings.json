@@ -19,5 +19,15 @@
   "enabledModels": [
     "openai-codex/gpt-5.6-luna"
   ],
-  "hideThinkingBlock": false
+  "hideThinkingBlock": false,
+  "subagents": {
+    "agentOverrides": {
+      "cursor-agent": {
+        "disabled": true
+      },
+      "cursor-agent-writer": {
+        "disabled": true
+      }
+    }
+  }
 }

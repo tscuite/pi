@@ -11,8 +11,9 @@
  *
  * 触发方式：
  *   - pi 会话启动 5 秒后自动同步一次（后台，不阻塞；完成后 ui.notify 一条 info 统计）
- *   - pi 会话结束时自动同步一次（总预算 8s，不阻塞退出）
+ *   - pi 会话结束时自动同步一次（总预算 8s；若启动同步还在跑则接上，不另开一轮）
  *   - 手动：/sync 命令，或 `node index.js [--dry-run]`
+ *   - 列表/写入遇超时、fetch failed、5xx 会退避重试；写入最多 4 路并发
  *   - pi 内部不打印任何裸 console（会破坏 TUI 画面）：
  *       · 每次同步（含 dormant/失败）追加一行到 <agent-root>/pi-remote-memory.log
  *       · 启动同步完成后 ui.notify(info) 带统计数字；失败 ui.notify(error)
@@ -34,7 +35,11 @@ import { pathToFileURL } from 'node:url';
 const SOURCE_TAG = 'pi-remote-memory';
 const DEFAULT_SCOPE = 'assistant';
 const DEFAULT_SUBJECT = 'pi-agent';
-const FETCH_TIMEOUT_MS = 20_000;
+const FETCH_TIMEOUT_MS = 12_000;
+const FETCH_RETRY_ATTEMPTS = 3;
+const FETCH_RETRY_BASE_MS = 400;
+const WRITE_CONCURRENCY = 4;
+const SNAPSHOT_RETRY_ATTEMPTS = 3;
 const SHUTDOWN_SYNC_BUDGET_MS = 8_000; // session_shutdown 同步总预算：pi 对该 handler 是无超时 await 的
 
 // 扩展模式下默认静默：pi TUI 接管终端后，裸 console 输出会原样打在光标当前位置
@@ -153,6 +158,59 @@ function resolvePageSize() {
   return Number.isInteger(raw) && raw >= 1 && raw <= 100 ? raw : PAGE_SIZE_DEFAULT;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /timeout|aborted|fetch failed|ECONNRESET|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|HTTP 408|HTTP 425|HTTP 429|HTTP 5\d\d/i.test(
+    message,
+  );
+}
+
+async function withRetry(fn, { attempts = FETCH_RETRY_ATTEMPTS, label = 'request' } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableError(error) || attempt === attempts) break;
+      const delay = FETCH_RETRY_BASE_MS * 2 ** (attempt - 1);
+      log(`${label} retry ${attempt}/${attempts} after ${delay}ms: ${error.message}`);
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
+
+async function mapPool(items, concurrency, worker) {
+  if (items.length === 0) return { ok: 0, errors: [] };
+
+  const errors = [];
+  let cursor = 0;
+  let ok = 0;
+  const n = Math.min(Math.max(concurrency, 1), items.length);
+
+  await Promise.all(
+    Array.from({ length: n }, async () => {
+      while (true) {
+        const index = cursor++;
+        if (index >= items.length) return;
+        try {
+          await worker(items[index], index);
+          ok += 1;
+        } catch (error) {
+          errors.push(error.message);
+        }
+      }
+    }),
+  );
+
+  return { ok, errors };
+}
+
 async function fetchRemotePage(config, pageSize, afterId) {
   const url = new URL('/api/memories', config.endpoint);
   for (const [key, value] of [
@@ -168,14 +226,16 @@ async function fetchRemotePage(config, pageSize, afterId) {
     url.searchParams.set('after_id', String(afterId));
   }
 
-  const response = await fetch(url, {
-    headers: { Authorization: authHeader(config) },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new Error(`remote list failed: HTTP ${response.status} ${await response.text()}`);
-  }
-  return response.json();
+  return withRetry(async () => {
+    const response = await fetch(url, {
+      headers: { Authorization: authHeader(config) },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      throw new Error(`remote list failed: HTTP ${response.status} ${await response.text()}`);
+    }
+    return response.json();
+  }, { label: 'list' });
 }
 
 async function fetchRemoteRows(config) {
@@ -214,136 +274,159 @@ function authHeader(config) {
 }
 
 async function createRemoteRow(config, row) {
-  const response = await fetch(new URL('/api/memories', config.endpoint), {
-    method: 'POST',
-    headers: { Authorization: authHeader(config), 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    body: JSON.stringify({
-      namespace: config.namespace,
-      scope: config.scope,
-      subject: config.subject,
-      // permanent：镜像语义 = 与本地一致（只增、按需检索）；不参与远端 cron 的
-      // daily→weekly→monthly→permanent 分层压缩，避免原文被机械摘要替换。
-      horizon: 'permanent',
-      target: row.target || 'memory',
-      category: row.category || null,
-      failure_reason: row.failure_reason || null,
-      content: row.content,
-      tags: [SOURCE_TAG],
-      metadata: { source: SOURCE_TAG },
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`create failed HTTP ${response.status}: ${await response.text()}`);
-  }
+  await withRetry(async () => {
+    const response = await fetch(new URL('/api/memories', config.endpoint), {
+      method: 'POST',
+      headers: { Authorization: authHeader(config), 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      body: JSON.stringify({
+        namespace: config.namespace,
+        scope: config.scope,
+        subject: config.subject,
+        // permanent：镜像语义 = 与本地一致（只增、按需检索）；不参与远端 cron 的
+        // daily→weekly→monthly→permanent 分层压缩，避免原文被机械摘要替换。
+        horizon: 'permanent',
+        target: row.target || 'memory',
+        category: row.category || null,
+        failure_reason: row.failure_reason || null,
+        content: row.content,
+        tags: [SOURCE_TAG],
+        metadata: { source: SOURCE_TAG },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`create failed HTTP ${response.status}: ${await response.text()}`);
+    }
+  }, { label: 'create' });
 }
 
 async function deleteRemoteRow(config, id) {
-  const response = await fetch(new URL(`/api/memories/${id}`, config.endpoint), {
-    method: 'DELETE',
-    headers: { Authorization: authHeader(config) },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-  if (!response.ok && response.status !== 404) {
-    throw new Error(`delete ${id} failed HTTP ${response.status}`);
-  }
+  await withRetry(async () => {
+    const response = await fetch(new URL(`/api/memories/${id}`, config.endpoint), {
+      method: 'DELETE',
+      headers: { Authorization: authHeader(config) },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`delete ${id} failed HTTP ${response.status}`);
+    }
+  }, { label: 'delete' });
 }
 
-let running = false;
+let inflight = null;
 
-async function runSync({ dryRun = false } = {}) {
-  if (running) {
+async function runSyncOnce({ dryRun = false } = {}) {
+  const configResult = loadConfig();
+  if (configResult.error) {
+    log(`dormant: ${configResult.error}`);
+    appendLog(`dormant: ${configResult.error}`);
+    return { dormant: configResult.error };
+  }
+  const config = configResult.value;
+
+  const dbPath = resolveLocalDbPath();
+  if (!existsSync(dbPath)) {
+    log(`dormant: local memory db not found: ${dbPath}`);
+    appendLog(`dormant: local memory db not found: ${dbPath}`);
+    return { dormant: `local memory db not found: ${dbPath}` };
+  }
+
+  let localRows;
+  let snapshotError;
+  for (let attempt = 1; attempt <= SNAPSHOT_RETRY_ATTEMPTS; attempt++) {
+    try {
+      localRows = readLocalMemories(dbPath);
+      snapshotError = null;
+      break;
+    } catch (error) {
+      snapshotError = error;
+      if (attempt < SNAPSHOT_RETRY_ATTEMPTS) {
+        await sleep(200 * attempt);
+      }
+    }
+  }
+  if (!localRows) {
+    // 快照撞上正在写入的 WAL 属正常竞态，本轮放弃，下个触发点重试
+    log(`snapshot failed (will retry on next trigger): ${snapshotError.message}`);
+    appendLog(`snapshot failed (will retry on next trigger): ${snapshotError.message}`);
+    return { dormant: `snapshot failed (will retry): ${snapshotError.message}` };
+  }
+
+  const remoteRows = await fetchRemoteRows(config);
+
+  const localHashes = new Set(localRows.map((row) => row.hash));
+  const remoteHashes = new Set(remoteRows.map((row) => row.hash));
+
+  const toCreate = localRows.filter((row) => !remoteHashes.has(row.hash));
+  const toDelete = remoteRows.filter((row) => {
+    if (row.compacted) return false; // 已压缩源行保留为历史
+    if (row.metadata?.kind === 'compaction') return false; // 压缩摘要不删
+    if (row.metadata?.source !== SOURCE_TAG) return false; // 只删自己创建的行
+    return !localHashes.has(row.hash);
+  });
+
+  log(
+    `local=${localRows.length} remote=${remoteRows.length} create=${toCreate.length} delete=${toDelete.length}${dryRun ? ' (dry-run)' : ''}`,
+  );
+  appendLog(
+    `local=${localRows.length} remote=${remoteRows.length} create=${toCreate.length} delete=${toDelete.length}${dryRun ? ' (dry-run)' : ''}`,
+  );
+
+  const createdResult = dryRun
+    ? { ok: toCreate.length, errors: [] }
+    : await mapPool(toCreate, WRITE_CONCURRENCY, (row) => createRemoteRow(config, row));
+  const deletedResult = dryRun
+    ? { ok: toDelete.length, errors: [] }
+    : await mapPool(toDelete, WRITE_CONCURRENCY, (row) => deleteRemoteRow(config, row.id));
+
+  const created = createdResult.ok;
+  const deleted = deletedResult.ok;
+  const errors = [...createdResult.errors, ...deletedResult.errors];
+
+  if (errors.length > 0) {
+    log(`${errors.length} errors after created=${created} deleted=${deleted}:\n  ${errors.join('\n  ')}`);
+    appendLog(
+      `${errors.length} errors after created=${created} deleted=${deleted}: ${errors.join(' | ')}`,
+    );
+    return {
+      error: `${errors.length} sync errors`,
+      created,
+      deleted,
+      local: localRows.length,
+      remote: remoteRows.length,
+    };
+  }
+
+  if (!dryRun && (created > 0 || deleted > 0)) {
+    log(`done: created=${created} deleted=${deleted}`);
+  }
+
+  return { created, deleted, local: localRows.length, remote: remoteRows.length };
+}
+
+async function runSync({ dryRun = false, waitIfRunning = false } = {}) {
+  if (inflight) {
+    if (waitIfRunning) {
+      log('sync already in progress, joining');
+      return inflight;
+    }
     log('sync already in progress, skipped');
     return { skipped: true };
   }
-  running = true;
 
-  try {
-    const configResult = loadConfig();
-    if (configResult.error) {
-      log(`dormant: ${configResult.error}`);
-      appendLog(`dormant: ${configResult.error}`);
-      return { dormant: configResult.error };
-    }
-    const config = configResult.value;
-
-    const dbPath = resolveLocalDbPath();
-    if (!existsSync(dbPath)) {
-      log(`dormant: local memory db not found: ${dbPath}`);
-      appendLog(`dormant: local memory db not found: ${dbPath}`);
-      return { dormant: `local memory db not found: ${dbPath}` };
-    }
-
-    let localRows;
+  inflight = (async () => {
     try {
-      localRows = readLocalMemories(dbPath);
+      return await runSyncOnce({ dryRun });
     } catch (error) {
-      // 快照撞上正在写入的 WAL 属正常竞态，本轮放弃，下个触发点重试
-      log(`snapshot failed (will retry on next trigger): ${error.message}`);
-      appendLog(`snapshot failed (will retry on next trigger): ${error.message}`);
-      return { dormant: `snapshot failed (will retry): ${error.message}` };
+      log(`sync failed: ${error.message}`);
+      appendLog(`sync failed: ${error.message}`);
+      return { error: error.message };
+    } finally {
+      inflight = null;
     }
+  })();
 
-    const remoteRows = await fetchRemoteRows(config);
-
-    const localHashes = new Set(localRows.map((row) => row.hash));
-    const remoteHashes = new Set(remoteRows.map((row) => row.hash));
-
-    const toCreate = localRows.filter((row) => !remoteHashes.has(row.hash));
-    const toDelete = remoteRows.filter((row) => {
-      if (row.compacted) return false; // 已压缩源行保留为历史
-      if (row.metadata?.kind === 'compaction') return false; // 压缩摘要不删
-      if (row.metadata?.source !== SOURCE_TAG) return false; // 只删自己创建的行
-      return !localHashes.has(row.hash);
-    });
-
-    log(
-      `local=${localRows.length} remote=${remoteRows.length} create=${toCreate.length} delete=${toDelete.length}${dryRun ? ' (dry-run)' : ''}`,
-    );
-    appendLog(
-      `local=${localRows.length} remote=${remoteRows.length} create=${toCreate.length} delete=${toDelete.length}${dryRun ? ' (dry-run)' : ''}`,
-    );
-
-    const errors = [];
-    let created = 0;
-    let deleted = 0;
-
-    for (const row of toCreate) {
-      try {
-        if (!dryRun) await createRemoteRow(config, row);
-        created += 1;
-      } catch (error) {
-        errors.push(error.message);
-      }
-    }
-
-    for (const row of toDelete) {
-      try {
-        if (!dryRun) await deleteRemoteRow(config, row.id);
-        deleted += 1;
-      } catch (error) {
-        errors.push(error.message);
-      }
-    }
-
-    if (errors.length > 0) {
-      log(`${errors.length} errors:\n  ${errors.join('\n  ')}`);
-      appendLog(`${errors.length} errors: ${errors.join(' | ')}`);
-      return { error: `${errors.length} sync errors` };
-    }
-
-    if (!dryRun && (created > 0 || deleted > 0)) {
-      log(`done: created=${created} deleted=${deleted}`);
-    }
-
-    return { created, deleted, local: localRows.length, remote: remoteRows.length };
-  } catch (error) {
-    log(`sync failed: ${error.message}`);
-    appendLog(`sync failed: ${error.message}`);
-    return { error: error.message };
-  } finally {
-    running = false;
-  }
+  return inflight;
 }
 
 // ── pi 扩展入口 ──────────────────────────────────────────────────────────────
@@ -392,7 +475,8 @@ export default function register(pi) {
       const timer = setTimeout(resolve, SHUTDOWN_SYNC_BUDGET_MS);
       timer.unref?.();
     });
-    return Promise.race([runSync().then(() => {}), budget]);
+    // 启动同步还在跑时接上它，不要再开一轮被 skipped 后直接退出
+    return Promise.race([runSync({ waitIfRunning: true }).then(() => {}), budget]);
   });
 
   pi.registerCommand('sync', {
